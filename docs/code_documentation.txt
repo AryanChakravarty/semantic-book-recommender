@@ -1,0 +1,492 @@
+# Semantic Book Recommender System - Code Documentation
+# This file contains all the code used in the project, organized by component
+
+==========================================
+DETAILED PROJECT EXPLANATION
+==========================================
+
+This project is a semantic book recommendation system that uses natural language processing and machine learning to recommend books based on user queries. Here's a detailed breakdown of how it works:
+
+1. OVERALL ARCHITECTURE
+----------------------
+The system consists of five main components that work together:
+- Data Exploration: Prepares and cleans the book dataset
+- Text Classification: Categorizes books based on their descriptions
+- Sentiment Analysis: Analyzes emotional content in book descriptions
+- Vector Search: Creates semantic embeddings for similarity search
+- Gradio Dashboard: Provides a user-friendly interface for recommendations
+
+2. COMPONENT-BY-COMPONENT EXPLANATION
+-----------------------------------
+
+2.1 Data Exploration (data-exploration.ipynb)
+-------------------------------------------
+Purpose: Prepare and clean the book dataset for further processing.
+
+Steps:
+1. Downloads a dataset of 7,000 books with metadata using Kaggle Hub
+2. Loads the data into a pandas DataFrame
+3. Removes books with missing descriptions (crucial for later analysis)
+4. Simplifies book categories by taking the first category from a pipe-separated list
+5. Saves the cleaned data for use in subsequent steps
+
+Key Features:
+- Uses kagglehub for easy dataset access
+- Handles missing data appropriately
+- Simplifies complex category structures
+
+2.2 Text Classification (text-classification.ipynb)
+------------------------------------------------
+Purpose: Train a classifier to categorize books based on their descriptions.
+
+Steps:
+1. Uses TF-IDF vectorization to convert book descriptions into numerical features
+2. Splits data into training and testing sets
+3. Trains a Multinomial Naive Bayes classifier
+4. Evaluates the model's performance
+
+Technical Details:
+- TF-IDF (Term Frequency-Inverse Document Frequency) captures word importance
+- Max features set to 5000 to manage dimensionality
+- Uses 80-20 train-test split for evaluation
+- MultinomialNB chosen for its efficiency with text data
+
+2.3 Sentiment Analysis (sentiment-analysis.ipynb)
+----------------------------------------------
+Purpose: Analyze the emotional content of book descriptions.
+
+Steps:
+1. Initializes a pre-trained emotion classification model
+2. Processes each book description to extract emotional content
+3. Creates separate columns for different emotions (joy, sadness, anger, fear, surprise)
+4. Saves the enriched dataset
+
+Technical Details:
+- Uses DistilRoBERTa model fine-tuned for emotion classification
+- Processes text in chunks of 512 tokens
+- GPU acceleration if available
+- Creates normalized emotion scores for each book
+
+2.4 Vector Search (vector-search.ipynb)
+-------------------------------------
+Purpose: Create a semantic search system for finding similar books.
+
+Steps:
+1. Creates a tagged description file combining ISBN and description
+2. Initializes sentence transformer embeddings
+3. Splits documents into manageable chunks
+4. Creates a vector store using Chroma
+
+Technical Details:
+- Uses all-MiniLM-L6-v2 model for efficient embeddings
+- Implements document chunking for better processing
+- Creates persistent vector store for faster subsequent access
+- Combines ISBN with description for accurate retrieval
+
+2.5 Gradio Dashboard (gradio-dashboard.py)
+----------------------------------------
+Purpose: Provide a user-friendly interface for book recommendations.
+
+Components:
+1. Data Loading and Initialization:
+   - Loads the enriched book dataset
+   - Initializes the vector store
+   - Sets up error handling
+
+2. Core Functions:
+   - initialize_vector_store(): Creates/loads the vector database
+   - retrieve_semantic_recommendations(): Finds similar books based on query
+   - recommend_books(): Formats recommendations for display
+
+3. User Interface:
+   - Text input for book description
+   - Category dropdown for filtering
+   - Emotion tone selector
+   - Gallery display for recommendations
+
+Features:
+- Real-time semantic search
+- Category filtering
+- Emotion-based sorting
+- Beautiful book cover display
+- Truncated descriptions with author information
+- Error handling and logging
+
+3. HOW IT ALL WORKS TOGETHER
+--------------------------
+1. User enters a book description in the dashboard
+2. The system:
+   a. Converts the query into embeddings
+   b. Finds similar books using vector similarity
+   c. Filters by category if specified
+   d. Sorts by emotional tone if selected
+   e. Returns formatted results with covers and descriptions
+
+4. TECHNICAL REQUIREMENTS
+-----------------------
+- Python environment with all required packages
+- Sufficient RAM for processing (recommended 8GB+)
+- GPU optional but recommended for faster processing
+- Internet connection for initial model downloads
+
+5. PERFORMANCE CONSIDERATIONS
+---------------------------
+- First run requires significant time for:
+  * Downloading models
+  * Creating embeddings
+  * Building vector store
+- Subsequent runs are faster due to caching
+- Memory usage peaks during vector store creation
+- GPU significantly speeds up emotion analysis
+
+==========================================
+1. DATA EXPLORATION (data-exploration.ipynb)
+==========================================
+
+# Initial Setup and Data Loading
+import kagglehub
+import pandas as pd
+
+# Download dataset
+path = kagglehub.dataset_download("dylanjcastillo/7k-books-with-metadata")
+print("Path to dataset files:", path)
+
+# Load books data
+books = pd.read_csv(f"{path}/books.csv")
+
+# Data Cleaning and Preprocessing
+# Remove rows with missing descriptions
+books = books.dropna(subset=['description'])
+
+# Clean categories
+books['simple_categories'] = books['categories'].str.split('|').str[0]
+
+# Save cleaned data
+books.to_csv('books_cleaned.csv', index=False)
+
+==========================================
+2. TEXT CLASSIFICATION (text-classification.ipynb)
+==========================================
+
+# Import required libraries
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import classification_report
+
+# Prepare data for classification
+vectorizer = TfidfVectorizer(max_features=5000)
+X = vectorizer.fit_transform(books['description'])
+y = books['simple_categories']
+
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Train classifier
+classifier = MultinomialNB()
+classifier.fit(X_train, y_train)
+
+# Evaluate
+predictions = classifier.predict(X_test)
+print(classification_report(y_test, predictions))
+
+==========================================
+3. SENTIMENT ANALYSIS (sentiment-analysis.ipynb)
+==========================================
+
+# Import required libraries
+from transformers import pipeline
+import torch
+
+# Initialize sentiment analyzer
+sentiment_analyzer = pipeline(
+    "text-classification",
+    model="j-hartmann/emotion-english-distilroberta-base",
+    device=0 if torch.cuda.is_available() else -1
+)
+
+# Analyze emotions in book descriptions
+def analyze_emotions(text):
+    emotions = sentiment_analyzer(text, truncation=True, max_length=512)
+    return emotions[0]
+
+# Process all book descriptions
+books['emotions'] = books['description'].apply(analyze_emotions)
+
+# Extract emotion scores
+books['joy'] = books['emotions'].apply(lambda x: x['score'] if x['label'] == 'joy' else 0)
+books['sadness'] = books['emotions'].apply(lambda x: x['score'] if x['label'] == 'sadness' else 0)
+books['anger'] = books['emotions'].apply(lambda x: x['score'] if x['label'] == 'anger' else 0)
+books['fear'] = books['emotions'].apply(lambda x: x['score'] if x['label'] == 'fear' else 0)
+books['surprise'] = books['emotions'].apply(lambda x: x['score'] if x['label'] == 'surprise' else 0)
+
+# Save results
+books.to_csv('books_with_emotions.csv', index=False)
+
+==========================================
+4. VECTOR SEARCH (vector-search.ipynb)
+==========================================
+
+# Import required libraries
+from langchain_community.document_loaders import TextLoader
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_text_splitters import CharacterTextSplitter
+from langchain_chroma import Chroma
+
+# Create tagged descriptions file
+books['tagged_description'] = books.apply(
+    lambda row: f"{row['isbn13']} {row['description']}", 
+    axis=1
+)
+books['tagged_description'].to_csv('tagged_description.txt', index=False, header=False)
+
+# Initialize embeddings
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
+
+# Load and split documents
+raw_documents = TextLoader("tagged_description.txt", encoding="utf-8").load()
+text_splitter = CharacterTextSplitter(
+    separator="\n",
+    chunk_size=1000,
+    chunk_overlap=200
+)
+documents = text_splitter.split_documents(raw_documents)
+
+# Create vector store
+db = Chroma.from_documents(
+    documents, 
+    embeddings,
+    persist_directory="./chroma_db"
+)
+
+==========================================
+5. GRADIO DASHBOARD (gradio-dashboard.py)
+==========================================
+
+import pandas as pd
+import numpy as np
+from dotenv import load_dotenv
+import os
+from pathlib import Path
+
+from langchain_community.document_loaders import TextLoader
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_text_splitters import CharacterTextSplitter
+from langchain_chroma import Chroma
+import gradio as gr
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Hugging Face embeddings
+try:
+    hf_embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
+except Exception as e:
+    print(f"Error initializing embeddings: {e}")
+    raise
+
+# Load books data
+try:
+    books = pd.read_csv("books_with_emotions.csv")
+    books["large_thumbnail"] = books["thumbnail"] + "&fife=w800"
+    books["large_thumbnail"] = np.where(
+        books["large_thumbnail"].isna(),
+        "cover-not-found.jpg",
+        books["large_thumbnail"],
+    )
+except Exception as e:
+    print(f"Error loading books data: {e}")
+    raise
+
+# Initialize vector store as None
+db_books = None
+
+def initialize_vector_store():
+    """Initialize the vector store if it hasn't been created yet."""
+    global db_books
+    if db_books is None:
+        try:
+            print("Starting to load documents...")
+            raw_documents = TextLoader("tagged_description.txt", encoding="utf-8").load()
+            print(f"Loaded {len(raw_documents)} raw documents")
+            
+            print("Splitting documents into chunks...")
+            text_splitter = CharacterTextSplitter(
+                separator="\n",
+                chunk_size=1000,
+                chunk_overlap=200
+            )
+            documents = text_splitter.split_documents(raw_documents)
+            print(f"Split into {len(documents)} chunks")
+            
+            print("Creating vector store with embeddings (this may take a while)...")
+            db_books = Chroma.from_documents(
+                documents, 
+                hf_embeddings,
+                persist_directory="./chroma_db"
+            )
+            print("Vector store initialized successfully")
+        except Exception as e:
+            print(f"Error initializing vector store: {e}")
+            raise
+
+def retrieve_semantic_recommendations(
+        query: str,
+        category: str = "All",
+        tone: str = None,
+        initial_top_k: int = 50,
+        final_top_k: int = 16,
+) -> pd.DataFrame:
+    if db_books is None:
+        initialize_vector_store()
+    
+    try:
+        recs = db_books.similarity_search(query, k=initial_top_k)
+        books_list = [int(rec.page_content.strip('"').split()[0]) for rec in recs]
+        book_recs = books[books["isbn13"].isin(books_list)]
+
+        if category != "All":
+            book_recs = book_recs[book_recs["simple_categories"] == category]
+
+        book_recs = book_recs.head(final_top_k)
+
+        if tone and tone != "All":
+            tone_mapping = {
+                "Happy": "joy",
+                "Surprising": "surprise",
+                "Angry": "anger",
+                "Suspenseful": "fear",
+                "Sad": "sadness"
+            }
+            if tone in tone_mapping:
+                book_recs = book_recs.sort_values(by=tone_mapping[tone], ascending=False)
+
+        return book_recs
+    except Exception as e:
+        print(f"Error in retrieve_semantic_recommendations: {e}")
+        return pd.DataFrame()
+
+def recommend_books(query: str, category: str, tone: str):
+    recommendations = retrieve_semantic_recommendations(query, category, tone)
+    results = []
+
+    for _, row in recommendations.iterrows():
+        description = row["description"]
+        truncated_desc_split = description.split()
+        truncated_description = " ".join(truncated_desc_split[:30]) + "..."
+
+        authors_split = row["authors"].split(";")
+        if len(authors_split) == 2:
+            authors_str = f"{authors_split[0]} and {authors_split[1]}"
+        elif len(authors_split) > 2:
+            authors_str = f"{', '.join(authors_split[:-1])}, and {authors_split[-1]}"
+        else:
+            authors_str = row["authors"]
+
+        caption = f"{row['title']} by {authors_str}: {truncated_description}"
+        results.append((row["large_thumbnail"], caption))
+
+    return results
+
+# Prepare categories and tones for dropdowns
+categories = ["All"] + sorted(books["simple_categories"].dropna().unique())
+tones = ["All"] + ["Happy", "Surprising", "Angry", "Suspenseful", "Sad"]
+
+# Create Gradio interface
+with gr.Blocks(theme=gr.themes.Glass()) as dashboard:
+    gr.Markdown("# Semantic Book Recommender")
+
+    with gr.Row():
+        user_query = gr.Textbox(
+            label="Please enter the description of a book",
+            placeholder="e.g., A story about forgiveness"
+        )
+        category_dropdown = gr.Dropdown(
+            choices=categories,
+            label="Select a category:",
+            value="All"
+        )
+        tone_dropdown = gr.Dropdown(
+            choices=tones,
+            label="Select an emotional tone:",
+            value="All"
+        )
+        submit_button = gr.Button("Find Recommendations")
+
+    gr.Markdown("## Recommendations")
+    output = gr.Gallery(
+        label="Recommended books",
+        columns=8,
+        rows=2
+    )
+
+    submit_button.click(
+        fn=recommend_books,
+        inputs=[user_query, category_dropdown, tone_dropdown],
+        outputs=output
+    )
+
+if __name__ == "__main__":
+    try:
+        print("Starting application...")
+        print("Initializing vector store (this may take several minutes)...")
+        initialize_vector_store()
+        print("Launching Gradio interface...")
+        dashboard.launch(share=False)
+    except Exception as e:
+        print(f"Error launching dashboard: {e}")
+        raise
+
+==========================================
+REQUIREMENTS
+==========================================
+
+# Required Python packages (requirements.txt):
+pandas
+numpy
+scikit-learn
+transformers
+torch
+langchain
+langchain-community
+langchain-huggingface
+langchain-text-splitters
+langchain-chroma
+gradio
+python-dotenv
+kagglehub
+sentence-transformers
+
+==========================================
+ENVIRONMENT SETUP
+==========================================
+
+# .env file should contain:
+OPENAI_API_KEY=your_api_key_here
+
+==========================================
+USAGE INSTRUCTIONS
+==========================================
+
+1. Install required packages:
+   pip install -r requirements.txt
+
+2. Set up environment variables:
+   - Create .env file with OpenAI API key
+   - Ensure .env is not in .gitignore
+
+3. Run the notebooks in order:
+   - data-exploration.ipynb
+   - text-classification.ipynb
+   - sentiment-analysis.ipynb
+   - vector-search.ipynb
+
+4. Launch the dashboard:
+   python gradio-dashboard.py
+
+Note: The first run of the dashboard will take several minutes to initialize
+the vector store. Subsequent runs will be faster as the embeddings are cached. 
